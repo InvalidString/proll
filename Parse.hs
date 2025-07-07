@@ -206,13 +206,14 @@ token = P <$> punkt
 p = single . P
 i = single . I
 
+
 comment = do
     tag "//"
     take0n (/= '\n')
-    void (tag "\n") ||| eof
+    () <$ tag "\n" ||| eof
 
 tokens = many $ do
-    many $ void (take1n isSpace) ||| comment
+    many $ () <$ take1n isSpace ||| comment
     token
 
 
