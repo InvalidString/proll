@@ -45,7 +45,7 @@ compileFile inFile outFile = do
     let grouped = groupBy (\(Clause a _ _) (Clause b _ _) -> a==b) clauses
     let preds = (\lst@((Clause x _ _):xs) ->
             Pred x ((\(Clause _ s g) -> (s,g)) <$> lst)) <$> grouped
-    let c = code (preds, querry)
+    let c = code (analizePred <$> preds, querry)
     let (is, symtab) = runCode c
     print is
     print symtab

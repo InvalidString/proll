@@ -276,7 +276,11 @@ term = App <$> struct
     ||| Anon <$ i "_"
     ||| (\l -> if isUpper $ head l then V l else A l) <$> identifier
 
-goal = Call <$> struct ||| do a <- term ; p "=" ; Unify a <$> term
+goal =
+    Fail <$ i "fail"
+    ||| Cut <$ p "!"
+    ||| Call <$> struct
+    ||| do a <- term ; p "=" ; Unify a <$> term
 
 
 clause = do
@@ -284,10 +288,13 @@ clause = do
     p "("
     args <- delimited (p ",") identifier
     p ")"
-    p ":-"
-    goals <- delimited (p ",") goal
+
+    goals <- try $ do
+        p ":-"
+        delimited (p ",") goal
+
     p "."
-    return $ Clause n args goals
+    return $ Clause n args (concat goals)
 
 
 querry = do

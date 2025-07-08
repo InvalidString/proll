@@ -80,16 +80,10 @@ halt = push . IHalt
 
 
 
-findFirstOcc (V x) = do
-    vars <- get
-    modify $ Set.insert x
-    return $ (if x `Set.member` vars then VBar else V) x
 
-findFirstOcc (App (Struct f xs)) = do
-    App . Struct f <$> mapM findFirstOcc xs
 
-findFirstOcc x = return x
-
+analizePred p@(Pred _ rr) =
+    evalState (findFirstOcc p) mempty
 
 (V x') `contains` x = x == x'
 (VBar x') `contains` x = x == x'
@@ -122,14 +116,13 @@ putstruct (f,n) = do
 
 call f n = do
     push $ ICall n
-    push $ ICall2 f
+    push $ IJump f
 bind = push IBind
 unify = push IUnify
 
 uatom a = symIdx a >>= push . IUAtom
 uvar = push . IUVar
 uref = push . IUref
-ustruct (f,n) a = undefined
 son = push . ISon
 up = push . IUp
 check xs ρ =
@@ -140,6 +133,13 @@ setbtp = push ISetBtp
 delbtp = push IDelbtp
 try = push . ITry
 jump = push . IJump
+prune = push IPrune
+
+ustruct (f,n) a = do
+    f <- symIdx f
+    push $ IUStruct f n
+    push $ IRJump a
+
 
 envLookup ρ x = fromJust $ Map.lookup x ρ
 envLookupPred ρ (f,n) = fromJust $ Map.lookup (f ++ "/" ++ show n) ρ
@@ -157,6 +157,8 @@ codeA (App (Struct f xs)) ρ = do
     putstruct (f,n) where n = length xs
 
 
+partStaticUnification = True
+
 codeG (Call (Struct f xs)) ρ = mdo
     mark b
     forM_ xs $ \x ->
@@ -165,29 +167,56 @@ codeG (Call (Struct f xs)) ρ = mdo
     b <- label
     return () where n = length xs
 
+codeG Fail ρ = push IFail
 
 codeG (Unify (V x) t) ρ | t `contains` x =
     push IFail
+
+
 
 codeG (Unify (V x) t) ρ = do
     putvar (envLookup ρ x)
     codeA t ρ
     bind
 
-codeG (Unify (VBar x) t) ρ = do
-    putref (envLookup ρ x)
-    codeA t ρ
-    unify
+codeG (Unify (VBar x) t) ρ =
+    if partStaticUnification
+    then do
+        putref (envLookup ρ x)
+        codeU t ρ
+    else do
+        putref (envLookup ρ x)
+        codeA t ρ
+        unify
+
+
+codeG (Unify (A x) (V y)) ρ = codeG (Unify (V y) (A x)) ρ
+codeG (Unify (A x) (VBar y)) ρ = codeG (Unify (VBar y) (A x)) ρ
+codeG (Unify (A x) y) ρ = when (A x /= y) $ push IFail
+
+
+codeG Cut ρ = do
+    prune
+    pushenv m where
+        m = envLookup ρ "stillUsedLocals"
+
 
 ivars (App (Struct _ xs)) = xs >>= ivars
 ivars (VBar x) = [x]
 ivars _ = []
 
+
+
+
 class HasVars a where
     vars :: a -> [Sym]
+    findFirstOcc :: a -> State (Set Sym) a
 
 instance HasVars Struct where
     vars (Struct f xs) = xs >>= vars
+
+    findFirstOcc (Struct f xs) = do
+        Struct f <$> mapM findFirstOcc xs
 
 instance HasVars Term where
     vars (App s) = vars s
@@ -195,12 +224,35 @@ instance HasVars Term where
     vars (VBar x) = [x]
     vars _ = []
 
+    findFirstOcc (V x) = do
+        vars <- get
+        modify $ Set.insert x
+        return $ (if x `Set.member` vars then VBar else V) x
+    findFirstOcc (App s) = App  <$> findFirstOcc s
+    findFirstOcc x = return x
+
 instance HasVars Goal where
   vars (Call s) = vars s
   vars (Unify a b) = vars a ++ vars b
+  vars Cut = []
+  vars Fail = []
+
+  findFirstOcc (Call s) = Call <$> findFirstOcc s
+  findFirstOcc (Unify a b) = Unify <$> findFirstOcc a <*> findFirstOcc b
+  findFirstOcc Cut = return Cut
+  findFirstOcc Fail = return Fail
 
 instance HasVars a => HasVars [a] where
     vars = (>>= vars)
+    findFirstOcc = mapM findFirstOcc
+
+instance HasVars Predicate where
+    vars (Pred _ rr) = foldMap v rr where
+        v (vs, gs) = vs <> vars gs
+    findFirstOcc (Pred f rr) = return $ Pred f $ fmap fd rr where
+        fd (vs, gs) = (vs, evalState (findFirstOcc gs) (Set.fromList vs))
+
+
 
 
 codeU (A a) ρ = uatom a
@@ -231,6 +283,7 @@ codeC (xs, gs) ρ = do
         where m = length vs
               vs = xs ++ Set.elems (Set.fromList (vars gs) Set.\\ Set.fromList xs)
               ρ' = ρ <+> foldMap (uncurry (|->)) (zip vs [1..])
+                    <+> "stillUsedLocals" |-> m
 
 codeP (Pred f rr) ρ = mdo
     l <- label

@@ -16,13 +16,6 @@
 #define HEAPREL(obj) (&(obj)->tag - m->heap_base)
 
 
-void pprintV(Machine *m, i32 val){
-    Tag *t = &m->heap_base[val];
-    assert(!"TODO");
-    switch (*t) {
-
-    }
-}
 
 #define H m->heap_base
 #define S m->data
@@ -42,9 +35,34 @@ void pprintV(Machine *m, i32 val){
 #define BPold   S[FP-4]
 #define negCont S[FP-5]
 
+void pprintV(Machine *m, i32 val){
+    Tag *t = &H[val];
+    if(!val) {
+        printf("⟨unbound⟩");
+        return;
+    }
+    switch (*t) {
+        case R: pprintV(m, H_(val, R).r); break;
+        case A: {
+            i32 a = H_(val, A).a;
+            printf("%s", m->strTab + a);
+        } break;
+        case C:{
+            HC_C* c = &H_(val, C);
+            printf("%s(", m->strTab + c->sym);
+            for (isz i = 0; i < c->len; i++) {
+                if(i > 0) printf(", ");
+                pprintV(m, c->data[i]);
+            }
+            printf(")");
+        } break;
+    }
+}
+
 i32 deref(Machine *m, i32 v){
-    if(H[v] == R ){
+    if(H[v] == R){
         HC_R ref = *((HC_R*)&H[v]);
+        assert(ref.r != v);
         if(ref.r != 0) return deref(m, ref.r);
     }
     return v;
@@ -59,7 +77,8 @@ void trail(Machine *m, i32 u){
 
 void reset(Machine *m, i32 x, i32 y){
     for (i32 u = y; x < u; u--) {
-        H_(T[u], R).r = T[u];
+        // 0 and not self
+        H_(T[u], R).r = 0;
     }
 }
 
@@ -143,18 +162,15 @@ int step(Machine *m, Instr i){
         } break;
         case MARK:{
             SP += 6;
-            posCont = i.arg;
-            FPold = FP;
+            S[SP] = i.arg;
+            S[SP-1] = FP;
             //TODO
         } break;
         // TODO: assembler needs to generate 2 instructions for "call p/n"
         //       and emit fail if predicate does not exist
         case CALL:{
-            // TODO: can this be done by calle?
             FP = SP - i.arg;
-        } break;
-        case CALL2:{
-            PC = i.arg;
+            // rest done by jump instruction
         } break;
         case FAIL:{
             backtrack(m);
@@ -175,10 +191,47 @@ int step(Machine *m, Instr i){
             if(unify(m, S[SP-1], S[SP])) SP -= 2;
             else backtrack(m);
         } break;
-        case UATOM:
-        case UVAR:
-        case USTRUCT:
-            printf("not implemented op: %s\n", Opcode2str(i.op)); exit(1);
+        case UATOM:{
+            i32 v = S[SP]; SP--;
+            switch(H[v]){
+                case A:{
+                    if(i.arg == H_(v, A).a) break;
+                    backtrack(m);
+                } break;
+                case R:{
+                    HC_A *a = new(&m->heap, HC_A);
+                    a->tag = A;
+                    a->a = i.arg;
+                    H_(v, R).r = HEAPREL(a);
+                    trail(m, v);
+                } break;
+                case C:
+                    backtrack(m);
+                break;
+            }
+        } break;
+        case UVAR: {
+            S[FP+i.arg] = S[SP]; SP--;
+        } break;
+        case USTRUCT:{
+            switch (H[S[SP]]) {
+                case C:{
+                    HC_C c = H_(S[SP], C);
+                    if(c.sym == i.f && c.len == i.n) break;
+                    backtrack(m);
+                } break;
+                case R:{
+
+                } break;
+                case A:{
+                    backtrack(m);
+                } break;
+            }
+            // RJUMP does rest
+        } break;
+        case RJUMP:{
+            if(H[S[SP]] == R) PC = i.arg;
+        } break;
         case POP:{
             SP--;
         } break;
@@ -190,7 +243,7 @@ int step(Machine *m, Instr i){
             if(!check(m, S[SP], deref(m, S[FP + i.arg]))) backtrack(m);
         } break;
         case SON:{
-            S[SP+1] = deref(m, H[S[SP]+i.arg]); SP++;
+            S[SP+1] = deref(m, H_(S[SP], C).data[i.arg-1]); SP++;
         } break;
         case UP:{
             SP--; PC = i.arg;
@@ -240,13 +293,24 @@ int step(Machine *m, Instr i){
         } break;
         case HALT:{
             isz n = i.arg;
-            for (isz i = 0; i < n; i++) {
-                S[FP+i];
+            printf("instr count: %d\n", m->count);
+            for (isz i = 1; i <= n; i++) {
+                printf("%ld: ", i);
+                pprintV(m, S[FP+i]);
+                puts("");
             }
-            return 1;
+            if(n == 0) puts("true");
+            int c = getc(stdin);
+            if(c == EOF) return 1;
+            printf("; ");
+            backtrack(m);
         } break;
         case NO:{
-            backtrack(m);
+            puts("false");
+            return 1;
+        } break;
+        case PRUNE:{
+            BP = BPold;
         } break;
     }
     return 0;
@@ -265,6 +329,7 @@ void run(Machine *m){
         Instr i = m->code[PC];
         PC++;
         if(step(m, i)) return;
+        m->count++;
 
 
         #ifdef STEPDEBUG
@@ -354,17 +419,26 @@ int main(int argc, char *argv[]) {
 
     memset(stack, 0, sizeof(stack));
 
+
     Machine m;
     m.code = code;
     m.pc = 0;
     m.data = stack;
     m.sp = -1;
     m.fp = -1;
+    m.tp = -1;
+    m.bp = 0;
     m.heap = arena_mmap(0x10000);
     m.trail = arena_mmap(0x10000);
     m.heap_base = (Tag*)m.heap.beg;
     m.trail_base = (i32*)m.trail.beg;
     m.strTab = strTab;
+
+    m.count = 0;
+
+    // put dummy at address 0, so we can use it as sentinel
+    new(&m.heap, Tag);
+
     if(shouldRun) run(&m);
 
     return 0;

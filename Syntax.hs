@@ -25,10 +25,10 @@ data Uop
 
 
 data Struct = Struct Sym [Term]
-    deriving(Show)
+    deriving(Show, Eq)
 data Term = B Int | A Sym | V Sym | VBar Sym | App Struct | Anon
-    deriving(Show)
-data Goal = Call Struct | Unify Term Term
+    deriving(Show, Eq)
+data Goal = Call Struct | Unify Term Term | Cut | Fail
     deriving(Show)
 data Clause = Clause Sym [Sym] [Goal]
     deriving(Show)
@@ -52,7 +52,6 @@ data Instr
 
     | IMark Int
     | ICall Int
-    | ICall2 Int
     | IFail
     | ISetBtp
 
@@ -61,7 +60,8 @@ data Instr
 
     | IUAtom Int
     | IUVar Int
-    | IUStruct
+    | IUStruct Int Int
+    | IRJump Int
     | IPop
     | IUref Int
     | ICheck Int
@@ -77,6 +77,7 @@ data Instr
     | IInit Int
     | IHalt Int
     | INo
+    | IPrune
 
 
     -- unary operations

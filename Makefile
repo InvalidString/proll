@@ -2,10 +2,10 @@ all: vm vm_dbg
 extra: compiler
 
 vm: wim.c mmap_file.c wim.h
-	gcc wim.c mmap_file.c -o vm
+	gcc wim.c mmap_file.c -o vm -g
 
 vm_dbg: wim.c mmap_file.c wim.h
-	gcc -DSTEPDEBUG wim.c mmap_file.c -o vm_dbg
+	gcc -DSTEPDEBUG wim.c mmap_file.c -o vm_dbg -g
 
 compiler: Autoserialize.hs Compile.hs Parse.hs Compiler.hs
 	ghc -dynamic Compiler.hs -o $@

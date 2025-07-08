@@ -51,9 +51,7 @@ typedef enum{
 
     MARK, // L
     // sets FP
-    CALL, // f/n
-    // actually jumps
-    CALL2,
+    CALL, // f/n   needs to be followed by jump
     FAIL,
     SETBTP,
 
@@ -64,6 +62,7 @@ typedef enum{
     UATOM,
     UVAR,
     USTRUCT,
+    RJUMP,
     POP,
     UREF,
     CHECK,
@@ -79,6 +78,7 @@ typedef enum{
     INIT,
     HALT,
     NO,
+    PRUNE,
 
     // unary operations
     NOT = UNOP_START,
@@ -136,6 +136,8 @@ typedef struct{
     Arena trail;
 
     char* strTab;
+
+    i32 count;
 } Machine;
 
 
@@ -155,7 +157,6 @@ static inline char* Opcode2str(Opcode op){
     case PUTSTRUCT:return"PUTSTRUCT";
     case MARK:return"MARK";
     case CALL:return"CALL";
-    case CALL2:return"CALL2";
     case FAIL:return"FAIL";
     case SETBTP:return"SETBTP";
     case BIND:return"BIND";
@@ -192,6 +193,8 @@ static inline char* Opcode2str(Opcode op){
     case INIT:return"INIT";
     case HALT:return"HALT";
     case NO:return"NO";
+    case PRUNE:return"PRUNE";
+    case RJUMP:return"RJUMP";
     }
     return 0;
 }
